@@ -28,7 +28,7 @@
 </head>
 <body>
 <main>
-  <h1>🖨️ Thử in cho app order</h1>
+  <h1>🖨️ Thử in cho app order <small style="font-size:13px;color:var(--muted)">· bản 2</small></h1>
   <p class="sub">Mở trang này bằng <b>Google Chrome</b> trên máy quầy, máy in đã cắm USB và bật nguồn. Bấm lần lượt từ trên xuống.</p>
 
   <div class="card">
@@ -44,6 +44,16 @@
       <option value="384">58 mm (máy in nhỏ)</option>
     </select>
     <button id="btnConnect">1. Kết nối máy in</button>
+  </div>
+
+  <div class="card">
+    <button id="btnCompare" disabled>In mẫu so sánh 3 mức độ đậm</button>
+    <div style="margin-top:12px"><label for="level">Độ đậm dùng cho phiếu và bill</label>
+    <select id="level">
+      <option value="0">Mức 1 – mảnh (như lần in đầu)</option>
+      <option value="1" selected>Mức 2 – đậm vừa</option>
+      <option value="2">Mức 3 – rất đậm</option>
+    </select></div>
   </div>
 
   <div class="card">
@@ -73,7 +83,7 @@ function log(msg) {
   $('#log').textContent = `[${t}] ${msg}\n` + $('#log').textContent;
 }
 function setStatus(text, cls) { const el = $('#status'); el.textContent = text; el.className = 'status ' + (cls || ''); }
-function enablePrint(on) { ['#btnPhieu', '#btnBill', '#btnAuto'].forEach(id => $(id).disabled = !on); }
+function enablePrint(on) { ['#btnPhieu', '#btnBill', '#btnAuto', '#btnCompare'].forEach(id => $(id).disabled = !on); }
 function hex(n) { return '0x' + n.toString(16).padStart(4, '0'); }
 function vnd(n) { return n.toLocaleString('vi-VN'); }
 function now() {
@@ -128,10 +138,26 @@ function wrap(ctx, text, maxW) {
   return lines.length ? lines : [''];
 }
 
-function renderReceipt(blocks) {
+/* Độ đậm: độ dày nét chữ, viền tô thêm quanh chữ, và ngưỡng đổi điểm xám thành chấm đen */
+const LEVELS = [
+  { normal: '400', bold: '700', stroke: 0,   thr: 150 }, // Mức 1: như bản đầu
+  { normal: '600', bold: '800', stroke: 0.8, thr: 195 }, // Mức 2
+  { normal: '700', bold: '900', stroke: 1.2, thr: 210 }, // Mức 3
+];
+function binarize(c, thr) {
+  const ctx = c.getContext('2d'), im = ctx.getImageData(0, 0, c.width, c.height), d = im.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2] < thr ? 0 : 255;
+    d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+  }
+  ctx.putImageData(im, 0, 0);
+}
+
+function renderReceipt(blocks, levelIdx) {
+  const L = LEVELS[levelIdx ?? parseInt($('#level').value, 10)];
   const W = parseInt($('#paper').value, 10);
   const s = W / 576, pad = Math.round(10 * s);
-  const font = (size, bold) => `${bold ? '700' : '400'} ${Math.round(size * s)}px Roboto, "Noto Sans", Arial, sans-serif`;
+  const font = (size, bold) => `${bold ? L.bold : L.normal} ${Math.round(size * s)}px Roboto, "Noto Sans", Arial, sans-serif`;
   const c = document.createElement('canvas'), ctx = c.getContext('2d');
   const ops = [];
   let y = pad;
@@ -168,8 +194,38 @@ function renderReceipt(blocks) {
     } else {
       ctx.font = o.font; ctx.textAlign = o.align; ctx.textBaseline = 'alphabetic';
       ctx.fillText(o.text, o.x, o.y);
+      if (L.stroke > 0) {
+        ctx.setLineDash([]); ctx.lineJoin = 'round';
+        ctx.lineWidth = L.stroke * s; ctx.strokeText(o.text, o.x, o.y);
+      }
     }
   }
+  binarize(c, L.thr); // xem trước = đúng những chấm sẽ in ra
+  return c;
+}
+
+/* Một dải giấy in 3 mức độ đậm nối nhau để so sánh */
+function sampleBlocks(i) {
+  return [
+    { text: `MỨC ${i + 1}` + (i === 0 ? ' (như lần in đầu)' : ''), size: 30, bold: true, align: 'center' },
+    { type: 'line' },
+    { text: '2 × Trà sữa trân châu đường đen', size: 32, bold: true },
+    { text: '+ Kem cheese', size: 28, indent: 40 },
+    { text: '• 50% Đường · 70% Đá', size: 28, indent: 40 },
+    { type: 'row', left: '1 × Trà đào cam sả', right: '35.000', size: 28 },
+    { text: 'Thử dấu: ăằắẳẵặ âầấẩẫậ đ êềếểễệ ôồốổỗộ ơờớởỡợ ưừứửữự', size: 22 },
+    { type: 'gap', h: 30 },
+  ];
+}
+function compareCanvas() {
+  const parts = [0, 1, 2].map(i => renderReceipt(sampleBlocks(i), i));
+  const W = parts[0].width, H = parts.reduce((a, p) => a + p.height, 0);
+  const c = document.createElement('canvas');
+  c.width = W; c.height = Math.ceil(H / 8) * 8;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, c.height);
+  let y = 0;
+  for (const p of parts) { ctx.drawImage(p, 0, y); y += p.height; }
   return c;
 }
 
@@ -187,7 +243,7 @@ function canvasToEscPos(c) {
         let byte = 0;
         for (let bit = 0; bit < 8; bit++) {
           const i = (y * W + bx * 8 + bit) * 4;
-          if (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2] < 150) byte |= 0x80 >> bit;
+          if (px[i] < 128) byte |= 0x80 >> bit; // ảnh đã được đổi sang đen/trắng lúc vẽ
         }
         out.push(byte);
       }
@@ -251,13 +307,13 @@ function billBlocks() {
 function showPreview(canvas) { const box = $('#previewBox'); box.innerHTML = ''; box.appendChild(canvas); }
 
 async function doPrint(kind) {
-  const canvas = renderReceipt(kind === 'bill' ? billBlocks() : phieuBlocks());
+  const canvas = kind === 'compare' ? compareCanvas() : renderReceipt(kind === 'bill' ? billBlocks() : phieuBlocks());
   showPreview(canvas);
   const bytes = canvasToEscPos(canvas);
   const t0 = performance.now();
   try {
     await send(bytes);
-    log(`Đã gửi ${kind === 'bill' ? 'bill' : 'phiếu pha chế'} (${(bytes.length / 1024).toFixed(1)} KB, ${Math.round(performance.now() - t0)} ms).`);
+    log(`Đã gửi ${kind === 'bill' ? 'bill' : kind === 'compare' ? 'mẫu so sánh độ đậm' : 'phiếu pha chế'} (${(bytes.length / 1024).toFixed(1)} KB, ${Math.round(performance.now() - t0)} ms).`);
   } catch (e) { log('Lỗi khi in: ' + e.message); setStatus('Lỗi khi in — xem nhật ký', 'err'); }
 }
 
@@ -276,6 +332,7 @@ function init() {
       else { setStatus('Lỗi kết nối — xem nhật ký', 'err'); log('Lỗi: ' + e.message); }
     }
   };
+  $('#btnCompare').onclick = () => doPrint('compare');
   $('#btnPhieu').onclick = () => doPrint('phieu');
   $('#btnBill').onclick = () => doPrint('bill');
   $('#btnAuto').onclick = () => {
